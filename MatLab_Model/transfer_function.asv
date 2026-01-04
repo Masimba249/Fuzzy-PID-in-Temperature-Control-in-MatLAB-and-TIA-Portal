@@ -1,0 +1,143 @@
+%% Grain Storage - Linear Simulation, Step, Impulse, Nyquist & Bode Analysis
+% Fully working in MATLAB R2024b and R2025a (bug-free Nyquist plot)
+clear; clc; close all;
+
+%% 1. Define Parameters
+tau_hours = 206.16;          % Time constant in hours
+tau_sec   = tau_hours * 3600; % Time constant in seconds
+K2        = 1;                % DC gain of the process
+
+%% 2. Create Transfer Function
+% First-order system: Gp(s) = K2 / (tau*s + 1)
+Gp = tf(K2, [tau_sec 1]);
+
+%% 3. Display Transfer Function
+disp('---------------------------------------------');
+disp(' GRAIN STORAGE TRANSFER FUNCTION Gp(s):');
+disp('---------------------------------------------');
+disp(Gp);
+disp('---------------------------------------------');
+
+%% 4. Fault Simulation (Step Change in Coolant Temperature)
+t_days = 0:0.1:50; 
+t_sec  = t_days' * 86400; 
+u_coolant = 15 * ones(size(t_sec));
+u_coolant(t_days >= 25) = 18;               % Fault at day 25
+
+T_grain = lsim(Gp, u_coolant, t_sec);
+
+figure('Color','w','Position',[100 100 900 600]);
+subplot(2,1,1);
+plot(t_days, u_coolant, 'g-', 'LineWidth', 2);
+ylabel('Coolant Temp T_c [°C]'); grid on;
+title('Input: Coolant Temperature Fault at Day 25');
+ylim([14 19]);
+
+subplot(2,1,2);
+plot(t_days, T_grain, 'b-', 'LineWidth', 2.5);
+hold on; yline(18, 'r--', 'LineWidth', 1.2);
+xlabel('Time [days]'); ylabel('Grain Temp T_{grain} [°C]');
+title(['Response to Coolant Fault (\tau = ' num2str(tau_hours,'%.1f') ' hours)']);
+grid on;
+
+%% 5. Standard Step Response (Normalized Unit Step)
+t_final_sec   = 5 * tau_sec; 
+[y_step, t_step] = step(Gp, t_final_sec);
+t_step_days   = t_step / 86400;
+tau_days      = tau_hours / 24;
+
+figure('Color','w','Position',[1000 100 800 500]);
+plot(t_step_days, y_step, 'k-', 'LineWidth', 2.5); hold on;
+plot([tau_days tau_days], [0 0.632], 'r--', 'LineWidth', 1.5);
+plot([0 tau_days], [0.632 0.632], 'r--', 'LineWidth', 1.5);
+plot(tau_days, 0.632, 'ro', 'MarkerFaceColor','r');
+xlabel('Time [days]'); ylabel('Amplitude');
+title('Unit Step Response');
+legend('Response', ['\tau = ' num2str(tau_days,'%.1f') ' days (63.2%)'], ...
+       'Location','southeast');
+grid on; axis tight; ylim([0 1.1]);
+
+%% 6. Impulse Response
+[y_imp, t_imp] = impulse(Gp, t_final_sec);
+t_imp_days = t_imp / 86400;
+peak_theory = K2 / tau_sec;           % K/τ
+y_at_tau    = peak_theory * exp(-1);
+
+figure('Color','w','Position',[600 50 900 550]);
+plot(t_imp_days, y_imp, 'b-', 'LineWidth', 2.5); hold on;
+plot(0, peak_theory, 'bp', 'MarkerSize', 10, 'MarkerFaceColor','c');
+plot([tau_days tau_days], [0 y_at_tau], 'm--', 'LineWidth', 1.5);
+plot([0 tau_days], [y_at_tau y_at_tau], 'm--', 'LineWidth', 1.5);
+plot(tau_days, y_at_tau, 'mo', 'MarkerSize', 8, 'MarkerFaceColor','m');
+xlabel('Time [days]'); ylabel('Amplitude');
+title('Impulse Response (Dirac Delta Input - System Shock)');
+legend('Impulse Response', ...
+       ['Peak = K/\tau = ' num2str(peak_theory,'%.2e') ' (at t=0+)'], ...
+       ['\tau = ' num2str(tau_days,'%.1f') ' days (36.8% of peak)'], ...
+       'Location','northeast');
+grid on;
+ax = gca; ax.YAxis.Exponent = 0; ax.YAxis.TickLabelFormat = '%.2e';
+
+%% 7. Nyquist Plot (FIXED - no crash in R2024b/R2025a)
+figure('Color','w','Position',[300 300 620 620]);
+nyquist(Gp);
+title('Nyquist Plot of Grain Storage Transfer Function G_p(s)');
+grid on;
+xlabel('Real Axis'); ylabel('Imaginary Axis');
+
+% FIXED: Avoid MATLAB bug with "axis equal"
+set(gca, 'DataAspectRatio', [1 1 1]);  % Keeps semicircle perfectly round
+xlim([-0.05 1.05]); ylim([-0.6 0.6]);
+
+hold on;
+plot(1, 0, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
+text(1, 0.05, '\omega = 0 (DC gain = 1)', 'VerticalAlignment','bottom', ...
+     'HorizontalAlignment','center', 'FontWeight','bold');
+
+%% 8. Bode Plot - MATLAB default style (very quick and clean)
+figure('Color','w','Position',[200 200 800 600]);
+bode(Gp);
+grid on;
+title('Bode Plot of Grain Storage System G_p(s) = 1/(206.16 \times 3600 s + 1)');
+
+%% 9. Bode Plot - Custom publication-quality style
+figure('Color','w','Position',[200 100 900 650]);
+w = logspace(-7, -1, 1000);  % Suitable range for this very slow system
+[mag, phase] = bode(Gp, w);
+mag = squeeze(mag); phase = squeeze(phase);
+mag_dB = 20*log10(mag);
+
+subplot(2,1,1);
+semilogx(w, mag_dB, 'b-', 'LineWidth', 2);
+hold on;
+omega_c = 1/tau_sec;
+plot([omega_c omega_c], [-100 10], 'r--', 'LineWidth', 1.5);
+plot(omega_c, 20*log10(1/sqrt(2)), 'ro', 'MarkerFaceColor','r', 'MarkerSize', 8);
+ylabel('Magnitude |G(j\omega)| [dB]');
+title('Bode Plot - Grain Storage Thermal Dynamics (\tau = 206.16 hours)');
+grid on;
+text(omega_c, 20*log10(1/sqrt(2))+5, sprintf(' \\omega_c = 1/\\tau \n = %.2e rad/s', omega_c), ...
+     'HorizontalAlignment','center','BackgroundColor','w');
+
+subplot(2,1,2);
+semilogx(w, phase, 'b-', 'LineWidth', 2);
+hold on;
+plot([omega_c omega_c], [-180 0], 'r--', 'LineWidth', 1.5);
+plot(omega_c, -45, 'ro', 'MarkerFaceColor','r', 'MarkerSize', 8);
+ylabel('Phase \phi [degrees]');
+xlabel('Frequency \omega [rad/s]');
+grid on;
+text(omega_c, -45-10, '-45° at \omega_c', 'HorizontalAlignment','center','BackgroundColor','w');
+
+sgtitle('Bode Diagram of First-Order Grain Storage System (Very Slow Dynamics)');
+
+%% Summary Output to Command Window
+tau_days = tau_hours / 24;
+fprintf('\n=== Summary ===\n');
+fprintf('Time constant τ = %.2f hours = %.2f days\n', tau_hours, tau_days);
+fprintf('Corner frequency ω_c = 1/τ = %.3e rad/s ≈ %.2f rad/day\n', ...
+        1/tau_sec, 1/tau_sec*86400);
+fprintf('At ω_c:   |G(jω_c)| = -3.01 dB,   phase = -45°\n');
+fprintf('Theoretical impulse peak = K/τ = %.3e [units/s]\n', peak_theory);
+fprintf('All plots generated successfully!\n');
+fprintf('================================\n\n');
